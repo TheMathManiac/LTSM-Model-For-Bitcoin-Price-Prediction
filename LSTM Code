@@ -1,0 +1,84 @@
+import datetime as dt
+import yfinance as yf
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import MinMaxScaler
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dropout, Dense
+import statsmodels.api as sm
+import matplotlib.dates as mdates
+
+########################################################################################################
+symbol = 'CHAMP-USD'
+start_date = dt.datetime(2014, 1, 1)
+end_date = dt.datetime.now()
+data = yf.download(symbol, start=start_date, end=end_date)
+data = data.reset_index()
+display(data.head(10))
+
+training_data = data[0: int(len(data)*0.7)]
+testing_data = data[int(len(data)*0.7): int(len(data))]
+
+training_data_close = training_data['Close'].values
+testing_data_close = testing_data['Close'].values
+
+scaler = MinMaxScaler(feature_range=(0,1))
+scaled_training_close_data = scaler.fit_transform(training_data_close.reshape(-1,1))
+scaled_training_close_data
+
+X_train = []
+Y_train = []
+
+for i in range(60, len(scaled_training_close_data)):
+    X_train.append(scaled_training_close_data[i-60:i])
+    Y_train.append(scaled_training_close_data[i,0])
+    
+X_train, Y_train = np.array(X_train), np.array(Y_train)    
+print(X_train.shape)
+
+algo = Sequential()
+algo.add(LSTM(units = 50, return_sequences = True, input_shape = (X_train.shape[1], 1)))
+algo.add(Dropout(0.2))
+algo.add(LSTM(units = 50, return_sequences = True))
+algo.add(Dropout(0.2))
+algo.add(LSTM(units = 50, return_sequences = True))
+algo.add(Dropout(0.2))
+algo.add(LSTM(units = 50))
+algo.add(Dropout(0.2))
+algo.add(Dense(units = 1))
+algo.compile(optimizer = 'adam', loss = 'mean_squared_error')
+algo.fit(X_train, Y_train, epochs = 15, batch_size = 32)
+
+past_60_days = training_data.tail(60)
+past_60_days_close_values = past_60_days['Close'].values
+print(past_60_days_close_values)
+
+actual_close_values = testing_data_close
+
+testing_data_close_final = np.concatenate((past_60_days_close_values, testing_data_close), axis=0)
+print(testing_data_close_final)
+testing_final_scaled = scaler.fit_transform(testing_data_close_final.reshape(-1,1))
+print(testing_final_scaled)
+
+X_test = []
+Y_test = []
+
+for i in range(60, testing_final_scaled.shape[0]):
+    X_test.append(testing_final_scaled[i-60:i])
+    Y_test.append(testing_final_scaled[i,0])
+    
+X_test, Y_test = np.array(X_test), np.array(Y_test)
+print(X_test.shape)
+print(Y_test.shape)
+
+predictions = algo.predict(X_test)
+predictions = scaler.inverse_transform(predictions)
+
+plt.plot(predictions, label='Predicted Coin Price', color='red')
+plt.plot(actual_close_values, label='Actual Coin Price', color='green')
+plt.title('Actual Bitcoin Price Vs Predicted Bitcoin Price')
+plt.legend()
+plt.xlabel('Time')
+plt.ylabel('Price')
+plt.show()
